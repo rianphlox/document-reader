@@ -1,0 +1,52 @@
+name: qread
+description: A comprehensive document reader app with real file scanning.
+
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # Core UI
+  cupertino_icons: ^1.0.2
+  
+  # Essential packages (removing problematic ones)
+  path_provider: ^2.1.1
+  permission_handler: ^11.1.0
+  provider: ^6.1.1
+  shared_preferences: ^2.2.2
+  share_plus: ^7.2.1
+  image_picker: ^1.0.4
+  
+  # PDF viewer
+  flutter_pdfview: ^1.3.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  
+  # Add assets if you have any
+  # assets:
+  #   - images/
+  #   - icons/
+
+# Android permissions needed in android/app/src/main/AndroidManifest.xml:
+# <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+# <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+# <uses-permission android:name="android.permission.INTERNET" />
+# <uses-permission android:name="android.permission.CAMERA" />
+
+# iOS permissions needed in ios/Runner/Info.plist:
+# <key>NSCameraUsageDescription</key>
+# <string>This app needs access to camera to scan documents</string>
+# <key>NSPhotoLibraryUsageDescription</key>
+# <string>This app needs access to photo library to select documents</string>
