@@ -7,9 +7,43 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:excel/excel.dart' as ExcelLib;
+import 'package:archive/archive.dart';
+import 'package:xml/xml.dart';
 import 'dart:io';
 import 'dart:convert';
 import 'dart:math' as math;
+
+// Import the new viewers
+import 'word_viewer.dart';
+import 'excel_viewer.dart';
+
+// Global helper function for opening documents
+void openDocument(BuildContext context, DocumentModel document) {
+  // Route to appropriate viewer based on file type
+  if (['doc', 'docx'].contains(document.type.toLowerCase())) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => WordViewerScreen(filePath: document.path),
+      ),
+    );
+  } else if (['xls', 'xlsx'].contains(document.type.toLowerCase())) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ExcelViewerScreen(filePath: document.path),
+      ),
+    );
+  } else {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => DocumentViewerScreen(document: document),
+      ),
+    );
+  }
+}
 
 // Real Document Model
 class DocumentModel {
@@ -469,6 +503,115 @@ class DocumentProvider extends ChangeNotifier {
       await prefs.setString('favorites', json.encode(favoriteIds));
     } catch (e) {
       print('Error saving favorites: $e');
+    }
+  }
+}
+
+// File content extraction helpers
+class DocumentContentExtractor {
+
+  // Extract content from Excel files
+  static Future<String> extractExcelContent(String filePath) async {
+    try {
+      final bytes = await File(filePath).readAsBytes();
+      final excel = ExcelLib.Excel.decodeBytes(bytes);
+
+      StringBuffer content = StringBuffer();
+
+      for (String table in excel.tables.keys) {
+        content.writeln('Sheet: $table');
+        content.writeln('=' * 30);
+
+        final sheet = excel.tables[table];
+        if (sheet != null) {
+          for (int row = 0; row < sheet.maxRows; row++) {
+            List<String> rowData = [];
+            for (int col = 0; col < sheet.maxColumns; col++) {
+              final cell = sheet.cell(ExcelLib.CellIndex.indexByColumnRow(columnIndex: col, rowIndex: row));
+              String cellValue = cell?.value?.toString() ?? '';
+              if (cellValue.isNotEmpty) {
+                rowData.add(cellValue);
+              }
+            }
+            if (rowData.isNotEmpty) {
+              content.writeln(rowData.join(' | '));
+            }
+          }
+        }
+        content.writeln();
+      }
+
+      return content.toString();
+    } catch (e) {
+      return 'Error reading Excel file: $e';
+    }
+  }
+
+  // Extract content from Word documents
+  static Future<String> extractWordContent(String filePath) async {
+    try {
+      final bytes = await File(filePath).readAsBytes();
+      final archive = ZipDecoder().decodeBytes(bytes);
+
+      // Look for document.xml file
+      for (final file in archive) {
+        if (file.name == 'word/document.xml') {
+          final content = utf8.decode(file.content);
+          final document = XmlDocument.parse(content);
+
+          // Extract text from XML
+          StringBuffer text = StringBuffer();
+          final textNodes = document.findAllElements('w:t');
+          for (final node in textNodes) {
+            text.write(node.innerText);
+            text.write(' ');
+          }
+
+          return text.toString().trim();
+        }
+      }
+
+      return 'No readable content found in Word document';
+    } catch (e) {
+      return 'Error reading Word document: $e';
+    }
+  }
+
+  // Extract content from PowerPoint presentations
+  static Future<String> extractPowerPointContent(String filePath) async {
+    try {
+      final bytes = await File(filePath).readAsBytes();
+      final archive = ZipDecoder().decodeBytes(bytes);
+
+      StringBuffer content = StringBuffer();
+      int slideNumber = 1;
+
+      // Look for slide files
+      for (final file in archive) {
+        if (file.name.startsWith('ppt/slides/slide') && file.name.endsWith('.xml')) {
+          final slideContent = utf8.decode(file.content);
+          final document = XmlDocument.parse(slideContent);
+
+          content.writeln('Slide $slideNumber:');
+          content.writeln('-' * 20);
+
+          // Extract text from slide
+          final textNodes = document.findAllElements('a:t');
+          for (final node in textNodes) {
+            final text = node.innerText.trim();
+            if (text.isNotEmpty) {
+              content.writeln(text);
+            }
+          }
+
+          content.writeln();
+          slideNumber++;
+        }
+      }
+
+      return content.toString();
+    } catch (e) {
+      return 'Error reading PowerPoint presentation: $e';
     }
   }
 }
@@ -1019,12 +1162,7 @@ class HomeScreen extends StatelessWidget {
   }
 
   void _openDocument(BuildContext context, DocumentModel document) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => DocumentViewerScreen(document: document),
-      ),
-    );
+    openDocument(context, document);
   }
 
   void _refreshDocuments(BuildContext context) {
@@ -1418,7 +1556,7 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return Center(child: CircularProgressIndicator());
           }
-          
+
           if (snapshot.hasError) {
             return Center(
               child: Text(
@@ -1427,11 +1565,102 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
               ),
             );
           }
-          
+
           return SingleChildScrollView(
             padding: EdgeInsets.all(16),
             child: Text(
               snapshot.data ?? 'Empty file',
+              style: TextStyle(
+                fontSize: 14,
+                height: 1.5,
+                color: Color(0xFF2D3748),
+              ),
+            ),
+          );
+        },
+      );
+    } else if (['xls', 'xlsx'].contains(widget.document.type.toLowerCase())) {
+      return FutureBuilder<String>(
+        future: DocumentContentExtractor.extractExcelContent(widget.document.path),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Reading Excel file...'),
+                ],
+              ),
+            );
+          }
+
+          return SingleChildScrollView(
+            padding: EdgeInsets.all(16),
+            child: Text(
+              snapshot.data ?? 'No content found',
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.4,
+                color: Color(0xFF2D3748),
+                fontFamily: 'monospace',
+              ),
+            ),
+          );
+        },
+      );
+    } else if (['doc', 'docx'].contains(widget.document.type.toLowerCase())) {
+      return FutureBuilder<String>(
+        future: DocumentContentExtractor.extractWordContent(widget.document.path),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Reading Word document...'),
+                ],
+              ),
+            );
+          }
+
+          return SingleChildScrollView(
+            padding: EdgeInsets.all(16),
+            child: Text(
+              snapshot.data ?? 'No content found',
+              style: TextStyle(
+                fontSize: 14,
+                height: 1.5,
+                color: Color(0xFF2D3748),
+              ),
+            ),
+          );
+        },
+      );
+    } else if (['ppt', 'pptx'].contains(widget.document.type.toLowerCase())) {
+      return FutureBuilder<String>(
+        future: DocumentContentExtractor.extractPowerPointContent(widget.document.path),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Reading PowerPoint presentation...'),
+                ],
+              ),
+            );
+          }
+
+          return SingleChildScrollView(
+            padding: EdgeInsets.all(16),
+            child: Text(
+              snapshot.data ?? 'No content found',
               style: TextStyle(
                 fontSize: 14,
                 height: 1.5,
@@ -1685,12 +1914,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     '${FileSystemService.formatFileSize(document.size)} • ${document.type.toUpperCase()}',
                   ),
                   onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => DocumentViewerScreen(document: document),
-                      ),
-                    );
+                    openDocument(context, document);
                   },
                 ),
               );
@@ -1782,12 +2006,7 @@ class DocumentListScreen extends StatelessWidget {
               final document = documents[index];
               return GestureDetector(
                 onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => DocumentViewerScreen(document: document),
-                    ),
-                  );
+                  openDocument(context, document);
                 },
                 child: Container(
                   margin: EdgeInsets.only(bottom: 12),
@@ -1938,12 +2157,7 @@ class FavoritesScreen extends StatelessWidget {
               final document = favoriteDocuments[index];
               return GestureDetector(
                 onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => DocumentViewerScreen(document: document),
-                    ),
-                  );
+                  openDocument(context, document);
                 },
                 child: Container(
                   margin: EdgeInsets.only(bottom: 12),
@@ -2082,12 +2296,7 @@ class RecentScreen extends StatelessWidget {
               final document = recentDocuments[index];
               return GestureDetector(
                 onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => DocumentViewerScreen(document: document),
-                    ),
-                  );
+                  openDocument(context, document);
                 },
                 child: Container(
                   margin: EdgeInsets.only(bottom: 12),
